@@ -366,11 +366,10 @@ long (*orig_custom_syscall)(void);
  */
 static int init_function(void) {
 	spin_lock(calltable_lock);
-
-
-
-
-
+	table[0].f = sys_call_table[0];
+	asmlinkage long (*mysyscallptr)(int, int, int);
+	mysyscallptr = &my_syscall;
+	sys_call_table[0] = mysyscallptr;
 	spin_unlock(calltable_lock);
 	return 0;
 }
