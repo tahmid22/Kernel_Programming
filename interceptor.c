@@ -447,6 +447,7 @@ static int init_function(void) {
 	set_addr_ro((unsigned long)sys_call_table);
 	spin_unlock(&calltable_lock);
 	printk(KERN_ALERT "@@@End of init_function@@@\n");
+
 	return 0;
 }
 
