@@ -348,6 +348,10 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 		printk(KERN_ALERT "@@@syscall number is invalid@@@\n");
 		return -EINVAL;
 	}
+	// Check if pid is valid
+	if (!pid_task(find_vpid(pid), PIDTYPE_PID)) {
+		return -EINVAL;
+	}
 	if (cmd == REQUEST_SYSCALL_INTERCEPT) {
 		printk(KERN_ALERT "Running REQUEST_SYSCAL_INTERCEPT\n");
 		// Check if calling process is root
@@ -385,7 +389,7 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 		set_addr_ro((unsigned long) sys_call_table);
 		spin_unlock(&calltable_lock);
 
-		// Defensively setting table[syscall] to orignal state
+		// Defensively setting table[syscall] to original state
 		spin_lock(&table_lock);
         table[syscall].f = (void *) NULL;
 		table[syscall].intercepted = 0;
@@ -393,19 +397,47 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 
 		printk(KERN_ALERT "@@@Restored the syscall table@@@\n");
 		printk(KERN_ALERT "@@@end of release in mysyscall@@@\n");
-	} else if (cmd == REQUEST_SYSCALL_RELEASE) {
-
 	} else if (cmd == REQUEST_START_MONITORING) {
 		printk(KERN_ALERT "Running REQUEST_START_MONITORING\n");
+		if(!check_root() && pid == 0) {
+			return -EPERM;
+		} else if (check_pid_from_list(getpid(), pid) == -EPERM) {
+			return -EPERM;
+		} if(check_pid_monitored(syscall,pid)==1) {
+			return -EBUSY;
+		} else if(table[syscall].intercepted == 0) {
+			return -EINVAL;			
+		} else {
+			spin_lock(&pidlist_lock);
+			int test = add_pid_sysc(pid, syscall) 
+			if (test != 0) {
+				spin_unlock(&pidlist_lock);
+				return -ENOMEM;			
+			}		
+			spin_unlock(&pidlist_lock);
+		}
+		
 	} else if (cmd == REQUEST_STOP_MONITORING) {
 		printk(KERN_ALERT "Running REQUEST_STOP_MONITORING\n");
+		if(!check_root() && pid == 0) {
+			return -EPERM;
+		} else if (check_pid_from_list(getpid(), pid) == -EPERM) {
+			return -EPERM;
+		} if(table[syscall].intercepted == 0) {
+			return -EINVAL;
+		} if(check_pid_monitored(syscall,pid)==0) {
+			return -EINVAL;
+		}
+		spin_lock(&pidlist_lock);
+		int test = del_pid_sysc(pid, syscall);
+		if(test != 0) {
+			spin_unlock(&pidlist_lock);
+			return -EAGAIN;		
+		}
+		spin_unlock(&pidlist_lock);		
 	} else {
 		return -EINVAL;
 	}
-
-
-
-
 	return 0;
 }
 
@@ -431,6 +463,13 @@ long (*orig_custom_syscall)(void);
  * - Ensure synchronization as needed.
  */
 static int init_function(void) {
+	int n = 0;	
+	for(n = 0; NR_syscalls > n; n++){
+		INIT_LIST_HEAD(&(table[n].my_list));
+		table[n].listcount = 0;
+		table[n].intercepted = 0;
+		table[n].monitored = 0;
+	}
 	spin_lock(&table_lock);
 	// Save original syscalls
 	orig_custom_syscall = sys_call_table[MY_CUSTOM_SYSCALL];
@@ -440,7 +479,6 @@ static int init_function(void) {
 	table[__NR_exit_group].f = orig_exit_group;
 	table[__NR_exit_group].intercepted = 1;
 	spin_unlock(&table_lock);
-
 	spin_lock(&calltable_lock);
 	//Set the system call table as read and write
     set_addr_rw((unsigned long)sys_call_table);
