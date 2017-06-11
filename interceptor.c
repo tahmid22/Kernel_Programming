@@ -385,7 +385,7 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 		set_addr_ro((unsigned long) sys_call_table);
 		spin_unlock(&calltable_lock);
 
-		// Defensivly setting table[syscall] to orignal state
+		// Defensively setting table[syscall] to orignal state
 		spin_lock(&table_lock);
         table[syscall].f = (void *) NULL;
 		table[syscall].intercepted = 0;
