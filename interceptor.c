@@ -401,7 +401,7 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 		printk(KERN_ALERT "Running REQUEST_START_MONITORING\n");
 		if(!check_root() && pid == 0) {
 			return -EPERM;
-		} else if (check_pid_from_list(getpid(), pid) == -EPERM) {
+		} else if (check_pid_from_list(current->pid, pid) == -EPERM) {
 			return -EPERM;
 		} if(check_pid_monitored(syscall,pid)==1) {
 			return -EBUSY;
@@ -409,8 +409,7 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 			return -EINVAL;			
 		} else {
 			spin_lock(&pidlist_lock);
-			int test = add_pid_sysc(pid, syscall) 
-			if (test != 0) {
+			if (add_pid_sysc(pid, syscall) != 0) {
 				spin_unlock(&pidlist_lock);
 				return -ENOMEM;			
 			}		
@@ -421,7 +420,7 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 		printk(KERN_ALERT "Running REQUEST_STOP_MONITORING\n");
 		if(!check_root() && pid == 0) {
 			return -EPERM;
-		} else if (check_pid_from_list(getpid(), pid) == -EPERM) {
+		} else if (check_pid_from_list(current->pid, pid) == -EPERM) {
 			return -EPERM;
 		} if(table[syscall].intercepted == 0) {
 			return -EINVAL;
@@ -429,8 +428,7 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 			return -EINVAL;
 		}
 		spin_lock(&pidlist_lock);
-		int test = del_pid_sysc(pid, syscall);
-		if(test != 0) {
+		if(del_pid_sysc(pid, syscall) != 0) {
 			spin_unlock(&pidlist_lock);
 			return -EAGAIN;		
 		}
@@ -472,11 +470,9 @@ static int init_function(void) {
 	}
 	spin_lock(&table_lock);
 	// Save original syscalls
-	orig_custom_syscall = sys_call_table[MY_CUSTOM_SYSCALL];
-    table[MY_CUSTOM_SYSCALL].f = orig_custom_syscall;
+    table[MY_CUSTOM_SYSCALL].f = sys_call_table[MY_CUSTOM_SYSCALL];
 	table[MY_CUSTOM_SYSCALL].intercepted = 1;
-	orig_exit_group = sys_call_table[__NR_exit_group];
-	table[__NR_exit_group].f = orig_exit_group;
+	table[__NR_exit_group].f = sys_call_table[__NR_exit_group];
 	table[__NR_exit_group].intercepted = 1;
 	spin_unlock(&table_lock);
 	spin_lock(&calltable_lock);
