@@ -252,16 +252,15 @@ void (*orig_exit_group)(int);
  */
 void my_exit_group(int status)
 {
-
-
-
+	printk(KERN_ALERT "@@@my_exit_group is called@@@");
+	orig_exit_group(status);
 }
 //----------------------------------------------------------------
 
 // ================= Helper Functions ==================
-int check_syscall_valid(int syscall) {return !(syscall < 0 || syscall > NR_syscalls || syscall == MY_CUSTOM_SYSCALL)}
+int check_syscall_valid(int syscall) {return !(syscall < 0 || syscall > NR_syscalls || syscall == MY_CUSTOM_SYSCALL);}
 
-int check_root() {
+int check_root(void) {
 	printk(KERN_ALERT "@@@checking calling process is root or not@@@\n");
 	return current_uid() == 0;
 }
@@ -432,16 +431,23 @@ long (*orig_custom_syscall)(void);
  * - Ensure synchronization as needed.
  */
 static int init_function(void) {
-	// Save original syscall
-	table[MY_CUSTOM_SYSCALL].f = sys_call_table[MY_CUSTOM_SYSCALL];
+	spin_lock(&table_lock);
+	// Save original syscalls
+	orig_custom_syscall = sys_call_table[MY_CUSTOM_SYSCALL];
+    table[MY_CUSTOM_SYSCALL].f = orig_custom_syscall;
 	table[MY_CUSTOM_SYSCALL].intercepted = 1;
-	//Initialize and lock
-	spin_lock_init(&calltable_lock);
+	orig_exit_group = sys_call_table[__NR_exit_group];
+	table[__NR_exit_group].f = orig_exit_group;
+	table[__NR_exit_group].intercepted = 1;
+	spin_unlock(&table_lock);
+
 	spin_lock(&calltable_lock);
 	//Set the system call table as read and write
     set_addr_rw((unsigned long)sys_call_table);
     // Hijack syscall table at 0
 	sys_call_table[MY_CUSTOM_SYSCALL] = &my_syscall;
+	// Hijack syscall table at __NR_exit_group
+	sys_call_table[__NR_exit_group] = &my_exit_group;
 	printk(KERN_ALERT "@@@modified sys_call_table at 0 index@@@\n");
 	//Set the system call table to read only and unlock
 	set_addr_ro((unsigned long)sys_call_table);
@@ -463,15 +469,19 @@ static int init_function(void) {
  */
 static void exit_function(void)
 {
-//	//Lock
-//	spin_lock(&calltable_lock);
-//	//Set the system call table as read and write
-//    set_addr_rw((unsigned long)sys_call_table);
-//    // Replace original system call at 0
-//	sys_call_table[MY_CUSTOM_SYSCALL] = table[MY_CUSTOM_SYSCALL].f;
-//	//Set the system call table to read only and unlock
-//	set_addr_ro(table_address);
-//	spin_unlock(&calltable_lock);
+	spin_lock(&calltable_lock);
+    set_addr_rw((unsigned long)sys_call_table);
+	sys_call_table[MY_CUSTOM_SYSCALL] = table[MY_CUSTOM_SYSCALL].f;
+	sys_call_table[__NR_exit_group] = table[__NR_exit_group].f;
+	set_addr_ro((unsigned long) sys_call_table);
+	spin_unlock(&calltable_lock);
+
+	spin_lock(&table_lock);
+	table[MY_CUSTOM_SYSCALL].f = (void *) NULL;
+	table[MY_CUSTOM_SYSCALL].intercepted = 0;
+	table[__NR_exit_group].f = (void *) NULL;
+	table[__NR_exit_group].intercepted = 0;
+	spin_unlock(&table_lock);
 }
 
 module_init(init_function);
