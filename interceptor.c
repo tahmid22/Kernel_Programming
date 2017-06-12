@@ -295,7 +295,7 @@ asmlinkage long interceptor(struct pt_regs reg) {
 		printk(KERN_DEBUG "Running interceptor\n");
 	}
 	long test = table[reg.ax].f(reg);
-	spin_unlock(&table_unlock);
+	spin_unlock(&table_lock);
     //TODO: Where is the docs/explanation for these registers?
     return test;
 }
