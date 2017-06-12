@@ -252,7 +252,9 @@ void (*orig_exit_group)(int);
 void my_exit_group(int status)
 {
 	printk(KERN_ALERT "@@@my_exit_group is called@@@");
+	spin_lock(&table_lock);
 	del_pid(current->pid);
+	spin_unlock(&table_lock);
 	orig_exit_group(status);
 }
 //----------------------------------------------------------------
@@ -286,9 +288,11 @@ int check_syscall_intercepted(int syscall_num) {return table[syscall_num].interc
  */
 asmlinkage long interceptor(struct pt_regs reg) {
 	//	- Check first to see if the syscall is being monitored for the current->pid.
+	spin_lock(&table_lock);	
 	if (check_pid_monitored(reg.ax, current->pid)) {
 		printk(KERN_DEBUG "Running interceptor\n");
 	}
+	spin_unlock(&table_unlock);
     //TODO: Where is the docs/explanation for these registers?
     return table[reg.ax].f(reg);
 }
@@ -437,7 +441,7 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 		} else {
 			if(del_pid_sysc(pid, syscall) != 0) {
 				spin_unlock(&table_lock);
-				return -EAGAIN;		
+				return -EAGAIN;	
 			}
 			spin_unlock(&table_lock);
 		}
