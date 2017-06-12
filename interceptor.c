@@ -267,7 +267,9 @@ int check_root(void) {
 	return current_uid() == 0;
 }
 
-int check_syscall_intercepted(int syscall_num) {return table[syscall_num].intercepted == 1;}
+int check_syscall_intercepted(int syscall_num) {
+	return table[syscall_num].intercepted == 1;
+	}
 // ================= End Helper Functions ==================
 
 /**
