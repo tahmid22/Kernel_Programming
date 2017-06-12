@@ -252,6 +252,7 @@ void (*orig_exit_group)(int);
 void my_exit_group(int status)
 {
 	printk(KERN_ALERT "@@@my_exit_group is called@@@");
+	del_pid(current->pid);
 	orig_exit_group(status);
 }
 //----------------------------------------------------------------
