@@ -361,10 +361,12 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 		// Check if calling process is root
 		if (!check_root()) {return -EPERM;}
         // Check if syscall has already been intercepted
-		if (check_syscall_intercepted(syscall)) {return -EBUSY;}
-
+		spin_lock(&table_lock);		
+		if (check_syscall_intercepted(syscall)){
+			spin_unlock(&table_lock);
+			return -EBUSY;
+		}
 		// Saving original syscall from sys_call_table
-		spin_lock(&table_lock);
        	table[syscall].f = sys_call_table[syscall];
 		printk(KERN_ALERT "@@@Saved the syscall table@@@\n");
         table[syscall].intercepted = 1;
