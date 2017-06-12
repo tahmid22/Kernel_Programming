@@ -407,8 +407,10 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 		}
 		spin_lock(&table_lock);		
 		if(table[syscall].intercepted == 0) {
+			spin_unlock(&table_lock);
 			return -EINVAL;			
 		} else if(check_pid_monitored(syscall,pid)==1) {
+			spin_unlock(&table_lock);
 			return -EBUSY;
 		} else {
 			if (add_pid_sysc(pid, syscall) != 0) {
@@ -427,15 +429,17 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 		}
 		spin_lock(&table_lock); 
 		if(table[syscall].intercepted == 0) {
+			spin_unlock(&table_lock);
 			return -EINVAL;
 		} else if(check_pid_monitored(syscall,pid)==0) {
+			spin_unlock(&table_lock);
 			return -EINVAL;
 		} else {
 			if(del_pid_sysc(pid, syscall) != 0) {
 				spin_unlock(&table_lock);
 				return -EAGAIN;		
 			}
-		spin_unlock(&table_lock);
+			spin_unlock(&table_lock);
 		}
 	} else {
 		return -EINVAL;
