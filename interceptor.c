@@ -294,9 +294,10 @@ asmlinkage long interceptor(struct pt_regs reg) {
 	if (check_pid_monitored(reg.ax, current->pid)) {
 		printk(KERN_DEBUG "Running interceptor\n");
 	}
+	long test = table[reg.ax].f(reg);
 	spin_unlock(&table_unlock);
     //TODO: Where is the docs/explanation for these registers?
-    return table[reg.ax].f(reg);
+    return test;
 }
 
 /**
