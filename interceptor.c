@@ -77,7 +77,6 @@ typedef struct {
 mytable table[NR_syscalls+1];
 
 /* Access to the table and pid lists must be synchronized */
-spinlock_t pidlist_lock = SPIN_LOCK_UNLOCKED;
 spinlock_t calltable_lock = SPIN_LOCK_UNLOCKED;
 spinlock_t table_lock = SPIN_LOCK_UNLOCKED;
 //-------------------------------------------------------------
@@ -286,9 +285,9 @@ int check_syscall_intercepted(int syscall_num) {return table[syscall_num].interc
  */
 asmlinkage long interceptor(struct pt_regs reg) {
 	//	- Check first to see if the syscall is being monitored for the current->pid.
-//	int monitored = 1;
-//	if (!monitored){return 0;}
-	printk(KERN_DEBUG "Running interceptor\n");
+	if (check_pid_monitored(reg.ax, current->pid)) {
+		printk(KERN_DEBUG "Running interceptor\n");
+	}
     //TODO: Where is the docs/explanation for these registers?
     return table[reg.ax].f(reg);
 }
@@ -393,6 +392,7 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 		spin_lock(&table_lock);
         table[syscall].f = (void *) NULL;
 		table[syscall].intercepted = 0;
+		destroy_list(syscall);
 		spin_unlock(&table_lock);
 
 		printk(KERN_ALERT "@@@Restored the syscall table@@@\n");
@@ -403,17 +403,18 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 			return -EPERM;
 		} else if (check_pid_from_list(current->pid, pid) == -EPERM) {
 			return -EPERM;
-		} if(check_pid_monitored(syscall,pid)==1) {
-			return -EBUSY;
-		} else if(table[syscall].intercepted == 0) {
+		}
+		spin_lock(&table_lock);		
+		if(table[syscall].intercepted == 0) {
 			return -EINVAL;			
+		} else if(check_pid_monitored(syscall,pid)==1) {
+			return -EBUSY;
 		} else {
-			spin_lock(&pidlist_lock);
 			if (add_pid_sysc(pid, syscall) != 0) {
-				spin_unlock(&pidlist_lock);
+				spin_unlock(&table_lock);
 				return -ENOMEM;			
 			}		
-			spin_unlock(&pidlist_lock);
+			spin_unlock(&table_lock);
 		}
 		
 	} else if (cmd == REQUEST_STOP_MONITORING) {
@@ -422,17 +423,19 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 			return -EPERM;
 		} else if (check_pid_from_list(current->pid, pid) == -EPERM) {
 			return -EPERM;
-		} if(table[syscall].intercepted == 0) {
-			return -EINVAL;
-		} if(check_pid_monitored(syscall,pid)==0) {
-			return -EINVAL;
 		}
-		spin_lock(&pidlist_lock);
-		if(del_pid_sysc(pid, syscall) != 0) {
-			spin_unlock(&pidlist_lock);
-			return -EAGAIN;		
+		spin_lock(&table_lock); 
+		if(table[syscall].intercepted == 0) {
+			return -EINVAL;
+		} else if(check_pid_monitored(syscall,pid)==0) {
+			return -EINVAL;
+		} else {
+			if(del_pid_sysc(pid, syscall) != 0) {
+				spin_unlock(&table_lock);
+				return -EAGAIN;		
+			}
+		spin_unlock(&table_lock);
 		}
-		spin_unlock(&pidlist_lock);		
 	} else {
 		return -EINVAL;
 	}
