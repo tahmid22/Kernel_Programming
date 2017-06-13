@@ -13,7 +13,7 @@
 
 
 MODULE_DESCRIPTION("My kernel module");
-MODULE_AUTHOR("Me");
+MODULE_AUTHOR("Blake, Frank, Tahmid");
 MODULE_LICENSE("GPL");
 
 //----- System Call Table Stuff ------------------------------------
@@ -73,8 +73,14 @@ typedef struct {
 	struct list_head my_list;
 }mytable;
 
+typedef struct {
+	int size;
+	int blacklist[1000];
+}blacklist;
+
 /* An entry for each system call */
 mytable table[NR_syscalls+1];
+blacklist pid_blacklist;
 
 /* Access to the table and pid lists must be synchronized */
 spinlock_t calltable_lock = SPIN_LOCK_UNLOCKED;
@@ -88,6 +94,42 @@ spinlock_t table_lock = SPIN_LOCK_UNLOCKED;
  * Nothing to do here, but please make sure to read over these functions
  * to understand their purpose, as you will need to use them!
  */
+
+
+// Clears the blacklist completely
+void clear_blacklist(void) {
+	int i = 0;
+	while (i<1000) {
+		pid_blacklist.blacklist[i] = 0;
+		i++;	
+	}
+	pid_blacklist.size = 0;
+}
+
+// Finds the element in the blacklist if it exists
+int search_blacklist(int pid) {
+	int i = 0;
+	while (i<pid_blacklist.size) {
+		if (pid_blacklist.blacklist[i] == pid) {
+			return i;		
+		}
+	}
+	return -1;
+}
+
+// Removes a given element from the blacklist
+int remove_element_blacklist(int pid) {
+	int i;
+	int test = search_blacklist(pid);
+	if (test == -1) {
+		return -1;	
+	}
+	for(i = test; i < pid_blacklist.size; i++) {
+		pid_blacklist.blacklist[i] = pid_blacklist.blacklist[i+1];
+	}
+	pid_blacklist.size--;
+	return 0;
+}
 
 /**
  * Add a pid to a syscall's list of monitored pids.
@@ -289,12 +331,15 @@ int check_syscall_intercepted(int syscall_num) {
  * - Don't forget to call the original system call, so we allow processes to proceed as normal.
  */
 asmlinkage long interceptor(struct pt_regs reg) {
+	long test;
 	//	- Check first to see if the syscall is being monitored for the current->pid.
 	spin_lock(&table_lock);	
 	if (check_pid_monitored(reg.ax, current->pid)) {
-		printk(KERN_DEBUG "Running interceptor\n");
+		if (search_blacklist(current->pid) == -1) {
+			log_message(current->pid, reg.ax, reg.bx, reg.cx, reg.dx, reg.si, reg.di, reg.bp);
+		}	
 	}
-	long test = table[reg.ax].f(reg);
+	test = table[reg.ax].f(reg);
 	spin_unlock(&table_lock);
     //TODO: Where is the docs/explanation for these registers?
     return test;
@@ -355,7 +400,9 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 		printk(KERN_ALERT "@@@syscall number is invalid@@@\n");
 		return -EINVAL;
 	}
-	// Check if pid is valid
+    if(!check_root() && pid == 0) {
+			return -EPERM;
+	}
 	if (!pid_task(find_vpid(pid), PIDTYPE_PID)) {
 		return -EINVAL;
 	}
@@ -409,9 +456,7 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 		printk(KERN_ALERT "@@@end of release in mysyscall@@@\n");
 	} else if (cmd == REQUEST_START_MONITORING) {
 		printk(KERN_ALERT "Running REQUEST_START_MONITORING\n");
-		if(!check_root() && pid == 0) {
-			return -EPERM;
-		} else if (check_pid_from_list(current->pid, pid) == -EPERM) {
+		if (check_pid_from_list(current->pid, pid) == -EPERM) {
 			return -EPERM;
 		}
 		spin_lock(&table_lock);		
@@ -425,15 +470,22 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 			if (add_pid_sysc(pid, syscall) != 0) {
 				spin_unlock(&table_lock);
 				return -ENOMEM;			
-			}		
+			}
+			if (pid == 0) {
+				table[syscall].monitored = 2;
+				clear_blacklist();	
+			} else {
+				table[syscall].monitored = 1;		
+			}
+			if(search_blacklist(pid) != -1) {
+				remove_element_blacklist(pid);			
+			}
 			spin_unlock(&table_lock);
 		}
 		
 	} else if (cmd == REQUEST_STOP_MONITORING) {
 		printk(KERN_ALERT "Running REQUEST_STOP_MONITORING\n");
-		if(!check_root() && pid == 0) {
-			return -EPERM;
-		} else if (check_pid_from_list(current->pid, pid) == -EPERM) {
+		if (check_pid_from_list(current->pid, pid) == -EPERM) {
 			return -EPERM;
 		}
 		spin_lock(&table_lock); 
@@ -443,11 +495,26 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 		} else if(check_pid_monitored(syscall,pid)==0) {
 			spin_unlock(&table_lock);
 			return -EINVAL;
-		} else {
+		} else if ((pid != 0) && table[syscall].monitored != 2) {
 			if(del_pid_sysc(pid, syscall) != 0) {
 				spin_unlock(&table_lock);
-				return -EAGAIN;	
+				return -EAGAIN;
 			}
+			if (table[syscall].listcount > 0) {
+				table[syscall].monitored = 1;		
+			} else {
+				table[syscall].monitored = 0;			
+			}
+			spin_unlock(&table_lock);
+		} else if (pid == 0) {
+			destroy_list(syscall);
+			table[syscall].monitored = 0;
+			clear_blacklist();
+			spin_unlock(&table_lock);
+		} else {
+			pid_blacklist.blacklist[pid_blacklist.size] = pid;
+			pid_blacklist.size++;
+			table[syscall].monitored = 1;
 			spin_unlock(&table_lock);
 		}
 	} else {
@@ -485,6 +552,7 @@ static int init_function(void) {
 		table[n].intercepted = 0;
 		table[n].monitored = 0;
 	}
+	pid_blacklist.size = 0;
 	spin_lock(&table_lock);
 	// Save original syscalls
     table[MY_CUSTOM_SYSCALL].f = sys_call_table[MY_CUSTOM_SYSCALL];
