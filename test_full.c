@@ -151,17 +151,29 @@ void do_as_guest(const char *str, int args1, int args2) {
 }
 
 int do_nonroot(int syscall) {
+	printf("13\n");
 	do_intercept(syscall, -EPERM);
+	printf("14\n");
 	do_release(syscall, -EPERM);
+	printf("15\n");
 	do_start(syscall, 0, -EPERM);
+	printf("16\n");
 	do_stop(syscall, 0, -EPERM);
+	printf("17\n");
 	do_start(syscall, 1, -EPERM);
+	printf("18\n");
 	do_stop(syscall, 1, -EPERM);
+	printf("19\n");
 	do_start(syscall, getpid(), 0);
+	printf("20\n");
 	do_start(syscall, getpid(), -EBUSY);
+	printf("21\n");
 	do_monitor(syscall);
+	printf("22\n");
 	do_stop(syscall, getpid(), 0);
+	printf("23\n");
 	do_stop(syscall, getpid(), -EINVAL);
+	printf("24\n");
 	return 0;
 }
 
@@ -169,18 +181,32 @@ int do_nonroot(int syscall) {
 void test_syscall(int syscall) {
 
 	//clear_log();
+    printf("@@@ Beginning of test_syscall @@@");
+    printf("1\n");
 	do_intercept(syscall, 0);
+	printf("2\n");
 	do_intercept(syscall, -EBUSY);
+	printf("3\n");
 	do_as_guest("./test_full nonroot %d", syscall, 0);
+	printf("4\n");
 	do_start(syscall, -2, -EINVAL);
+	printf("5\n");
 	do_start(syscall, 0, 0);
+	printf("6\n");
 	do_stop(syscall, 0, 0);
+	printf("7\n");
 	do_start(syscall, 1, 0);
+	printf("8\n");
 	do_as_guest("./test_full stop %d 1 %d", syscall, -EPERM);
+	printf("9\n");
 	do_stop(syscall, 1, 0);
+	printf("10\n");
 	do_as_guest("./test_full start %d -1 %d", syscall, 0);
+	printf("11\n");
 	do_stop(syscall, last_child, -EINVAL);
+	printf("12\n");
 	do_release(syscall, 0);
+	printf("13\n");
 }
 
 
