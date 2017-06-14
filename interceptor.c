@@ -74,8 +74,8 @@ typedef struct {
 }mytable;
 
 typedef struct {
-	int size;
-	int blacklist[1000];
+	int size[NR_syscalls+1];
+	int table[NR_syscalls+1][100];
 }blacklist;
 
 /* An entry for each system call */
@@ -85,6 +85,7 @@ blacklist pid_blacklist;
 /* Access to the table and pid lists must be synchronized */
 spinlock_t calltable_lock = SPIN_LOCK_UNLOCKED;
 spinlock_t table_lock = SPIN_LOCK_UNLOCKED;
+spinlock_t blacklist_lock = SPIN_LOCK_UNLOCKED;
 //-------------------------------------------------------------
 
 
@@ -97,20 +98,20 @@ spinlock_t table_lock = SPIN_LOCK_UNLOCKED;
 
 
 // Clears the blacklist completely
-void clear_blacklist(void) {
+void clear_blacklist(int syscall) {
 	int i = 0;
-	while (i<1000) {
-		pid_blacklist.blacklist[i] = 0;
+	while (i<100) {
+		pid_blacklist.table[syscall][i] = 0;
 		i++;	
 	}
 	pid_blacklist.size = 0;
 }
 
 // Finds the element in the blacklist if it exists
-int search_blacklist(int pid) {
+int search_blacklist(int pid, int syscall) {
 	int i = 0;
-	while (i<pid_blacklist.size) {
-		if (pid_blacklist.blacklist[i] == pid) {
+	while (i<pid_blacklist.size[syscall]) {
+		if (pid_blacklist.table[syscall][i] == pid) {
 			return i;		
 		}
 	}
@@ -118,16 +119,16 @@ int search_blacklist(int pid) {
 }
 
 // Removes a given element from the blacklist
-int remove_element_blacklist(int pid) {
+int remove_element_blacklist(int pid, int syscall) {
 	int i;
-	int test = search_blacklist(pid);
+	int test = search_blacklist(pid, syscall);
 	if (test == -1) {
 		return -1;	
 	}
 	for(i = test; i < pid_blacklist.size; i++) {
-		pid_blacklist.blacklist[i] = pid_blacklist.blacklist[i+1];
+		pid_blacklist.table[syscall][i] = pid_blacklist.table[syscall][i+1];
 	}
-	pid_blacklist.size--;
+	pid_blacklist.size[syscall]--;
 	return 0;
 }
 
@@ -486,9 +487,11 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 			} else {
 				table[syscall].monitored = 1;
 			}
+			spin_lock(&blacklist_lock);
 			if(search_blacklist(pid) != -1) {
 				remove_element_blacklist(pid);
 			}
+			spin_unlock(&blacklist_lock);
 			spin_unlock(&table_lock);
 		}
 
@@ -524,11 +527,15 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 		} else if (pid == 0) {
 			destroy_list(syscall);
 			table[syscall].monitored = 0;
-			clear_blacklist();
+			spin_lock(&blacklist_lock);
+			clear_blacklist(syscall);
+			spin_unlock(&blacklist_lock);
 			spin_unlock(&table_lock);
 		} else {
-			pid_blacklist.blacklist[pid_blacklist.size] = pid;
-			pid_blacklist.size++;
+			spin_lock(&blacklist_lock);
+			pid_blacklist.table[syscall][pid_blacklist.size[syscall]] = pid;
+			pid_blacklist.size[syscall]++;
+			spin_lock(&blacklist_lock);
 			table[syscall].monitored = 1;
 			spin_unlock(&table_lock);
 		}
@@ -561,14 +568,18 @@ long (*orig_custom_syscall)(void);
  */
 static int init_function(void) {
 	int n = 0;
-	for(n = 0; NR_syscalls > n; n++){
+	int q = 0;
+	spin_lock(&table_lock);
+	spin_lock(&blacklist_lock);
+	for(n = 0; NR_syscalls+1 > n; n++){
 		INIT_LIST_HEAD(&(table[n].my_list));
 		table[n].listcount = 0;
 		table[n].intercepted = 0;
 		table[n].monitored = 0;
+		pid_blacklist.size[n] = 0;
+		clear_blacklist(n);
 	}
-	pid_blacklist.size = 0;
-	spin_lock(&table_lock);
+	spin_unlock(&blacklist_lock);
 	// Save original syscalls
 	orig_custom_syscall = sys_call_table[MY_CUSTOM_SYSCALL];
     table[MY_CUSTOM_SYSCALL].f = orig_custom_syscall;
