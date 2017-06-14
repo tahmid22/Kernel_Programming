@@ -573,19 +573,27 @@ static int init_function(void) {
  */
 static void exit_function(void)
 {
+	int n;
 	spin_lock(&calltable_lock);
     set_addr_rw((unsigned long)sys_call_table);
 	sys_call_table[MY_CUSTOM_SYSCALL] = table[MY_CUSTOM_SYSCALL].f;
 	sys_call_table[__NR_exit_group] = table[__NR_exit_group].f;
 	set_addr_ro((unsigned long) sys_call_table);
-	spin_unlock(&calltable_lock);
 
 	spin_lock(&table_lock);
 	table[MY_CUSTOM_SYSCALL].f = (void *) NULL;
 	table[MY_CUSTOM_SYSCALL].intercepted = 0;
 	table[__NR_exit_group].f = (void *) NULL;
 	table[__NR_exit_group].intercepted = 0;
+	for(n=0;n<NR_syscalls;n++) {
+		if(table[n].intercepted == 1) {
+			sys_call_table[n] = table[n].f;
+			table[n].f = (void *) NULL;
+			table[n].intercepted = 0;
+		}
+	}
 	spin_unlock(&table_lock);
+	spin_unlock(&calltable_lock);
 }
 
 module_init(init_function);
